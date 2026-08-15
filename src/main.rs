@@ -1,74 +1,82 @@
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
-use std::{env, fs, path::Path};
+use std::{env, fs, io::Write, path::Path};
+
 fn main() -> Result<()> {
-    let mut a = env::args().skip(1);
-    match a.next().as_deref() {
+    let mut args = env::args().skip(1);
+    match args.next().as_deref() {
         Some("append") => {
-            let ledger = a.next().context("missing ledger")?;
-            let proof = a.next().context("missing proof")?;
-            if a.next().as_deref() != Some("--label") {
+            let ledger = args.next().context("missing ledger")?;
+            if args.next().as_deref() != Some("--kind") {
+                bail!("expected --kind");
+            }
+            let kind = args.next().context("missing kind")?;
+            if args.next().as_deref() != Some("--artifact") {
+                bail!("expected --artifact");
+            }
+            let artifact = args.next().context("missing artifact")?;
+            if args.next().as_deref() != Some("--label") {
                 bail!("expected --label");
             }
-            let label = a.next().context("missing label")?;
-            append(&ledger, &proof, &label)?
+            let label = args.next().context("missing label")?;
+            append(&ledger, &kind, &artifact, &label)?;
         }
-        Some("verify") => verify(&a.next().context("missing ledger")?)?,
-        _ => bail!("usage: axiom-proof append ledger proof --label LABEL | verify ledger"),
-    };
+        Some("verify") => verify(&args.next().context("missing ledger")?)?,
+        _ => bail!("usage: axiom-proof append ledger --kind KIND --artifact FILE --label LABEL | verify ledger"),
+    }
     Ok(())
 }
-fn append(ledger: &str, proof: &str, label: &str) -> Result<()> {
-    let proof_raw = fs::read_to_string(proof)?;
-    if !proof_raw.starts_with("AXIOM-PROOF/1\n") {
-        bail!("not an AXIOM-PROOF/1 receipt");
-    }
-    let prev = if Path::new(ledger).exists() {
+
+fn append(ledger: &str, kind: &str, artifact: &str, label: &str) -> Result<()> {
+    let previous = if Path::new(ledger).exists() {
         last_hash(&fs::read_to_string(ledger)?)?
     } else {
         "0".repeat(64)
     };
-    let ph = hex(&hash(proof_raw.as_bytes()));
-    let payload = format!("prev={prev};proof={ph};label={label}");
-    let node = hex(&hash(payload.as_bytes()));
-    let line = format!("{node}\t{prev}\t{ph}\t{label}\n");
-    fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(ledger)?
-        .write_all(line.as_bytes())?;
+    let artifact_hash = sha256_hex(&fs::read(artifact)?);
+    let payload = format!("prev={previous};kind={kind};artifact={artifact_hash};label={label}");
+    let node = sha256_hex(payload.as_bytes());
+    writeln!(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(ledger)?,
+        "{node}\t{previous}\t{kind}\t{artifact_hash}\t{label}"
+    )?;
     println!("{node}");
     Ok(())
 }
-use std::io::Write;
+
 fn verify(path: &str) -> Result<()> {
     let raw = fs::read_to_string(path)?;
-    let mut expected = "0".repeat(64);
+    let mut previous = "0".repeat(64);
     let mut count = 0usize;
-    for (i, l) in raw.lines().enumerate() {
-        let p: Vec<_> = l.split('\t').collect();
-        if p.len() != 4 {
-            bail!("line {} malformed", i + 1)
+    for (index, line) in raw.lines().enumerate() {
+        let fields: Vec<_> = line.split('\t').collect();
+        if fields.len() != 5 {
+            bail!("line {} malformed", index + 1);
         }
-        let node = p[0];
-        let prev = p[1];
-        let proof = p[2];
-        let label = p[3];
-        if prev != expected {
-            bail!("line {} breaks chain", i + 1)
+        let node = fields[0];
+        let prev = fields[1];
+        let kind = fields[2];
+        let artifact = fields[3];
+        let label = fields[4];
+        if prev != previous {
+            bail!("line {} breaks the hash chain", index + 1);
         }
-        let calc = hex(&hash(
-            format!("prev={prev};proof={proof};label={label}").as_bytes(),
-        ));
-        if node != calc {
-            bail!("line {} hash mismatch", i + 1)
+        let calculated = sha256_hex(
+            format!("prev={prev};kind={kind};artifact={artifact};label={label}").as_bytes(),
+        );
+        if node != calculated {
+            bail!("line {} node hash mismatch", index + 1);
         }
-        expected = node.to_owned();
+        previous = node.to_owned();
         count += 1;
     }
-    println!("VALID DAG CHAIN: {count} node(s), head={expected}");
+    println!("VALID PROOF DAG: {count} event(s), head={previous}");
     Ok(())
 }
+
 fn last_hash(raw: &str) -> Result<String> {
     Ok(raw
         .lines()
@@ -76,12 +84,13 @@ fn last_hash(raw: &str) -> Result<String> {
         .context("empty ledger")?
         .split('\t')
         .next()
-        .context("bad ledger")?
+        .context("malformed ledger")?
         .to_owned())
 }
-fn hash(b: &[u8]) -> [u8; 32] {
-    Sha256::digest(b).into()
-}
-fn hex(h: &[u8; 32]) -> String {
-    h.iter().map(|b| format!("{b:02x}")).collect()
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
