@@ -55,3 +55,5 @@ credentials/
 cookies.json
 cookies*.json
 *cookies*.zip
+
+.lake/
