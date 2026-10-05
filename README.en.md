@@ -3,6 +3,6 @@
 Typed append-only hash DAG events for specification, candidate, counterexample, proof and promotion artifacts. This is
 still a local tamper-evident chain; multi-writer consensus comes later.
 
-## Авторство
+## Attribution
 
-Сопровождающий собственных изменений: **Ivan Zorin (localzet)** — <creator@localzet.com> · https://www.localzet.com. Copyright © 2026 Localzet Group. Исходное авторство и лицензии сторонних компонентов сохраняются. См. [AUTHORS](.github/AUTHORS.md).
+Maintainer of Localzet contributions: **Ivan Zorin (localzet)** — <creator@localzet.com> · https://www.localzet.com. Copyright © 2026 Localzet Group. Original authorship and third-party licenses remain applicable. See [AUTHORS](.github/AUTHORS.md).
